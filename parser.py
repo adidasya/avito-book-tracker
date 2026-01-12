@@ -153,6 +153,33 @@ def search_avito_today(book):
         return False, None, None
 
 def main():
+     """Точка входа с авто-тестом работы"""
+    
+    # === АВТО-ТЕСТ ПРИ КАЖДОМ ЗАПУСКЕ ===
+    print("=" * 60)
+    print(f"🤖 АВТО-ТЕСТ РАБОТЫ ПАРСЕРА")
+    print(f"📅 Дата: {datetime.now().strftime('%d.%m.%Y')}")
+    print(f"⏰ Время: {datetime.now().strftime('%H:%M:%S')}")
+    print("=" * 60)
+    
+    # Тест отправки в Telegram
+    test_message = (
+        f"🔄 <b>Парсер запущен</b>\n"
+        f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n"
+        f"📚 Проверяю {len(BOOKS)} книг\n"
+        f"🔍 Ищу: только СЕГОДНЯШНИЕ объявления"
+    )
+    
+    telegram_ok = send_telegram(test_message, silent=True)
+    
+    if telegram_ok:
+        print("✅ Telegram: ОК (тестовое сообщение отправлено)")
+    else:
+        print("❌ Telegram: ошибка отправки")
+    
+    # Дальше идет обычная проверка книг...
+    run_parser()
+
     """Вечный парсер (работает с любыми датами)"""
     current_datetime = datetime.now()
     date_str = current_datetime.strftime('%d.%m.%Y')
