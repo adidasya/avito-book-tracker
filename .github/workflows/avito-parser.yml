@@ -1,55 +1,25 @@
-name: Avito Book Parser
+name: Avito Parser
 
-# ВАЖНО: ДВА отдельных триггера
 on:
-  # 1. РАСПИСАНИЕ (отдельный триггер)
-  schedule:
-    - cron: '2-59/5 * * * *'  # Каждые 5 минут, НЕ в :00
-  
-  # 2. РУЧНОЙ запуск (отдельный триггер)  
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
 
-# РАЗНЫЕ JOBS для разных триггеров
 jobs:
-  # JOB 1: Для расписания (авто-запуск)
-  scheduled-parse:
-    # Запускается ТОЛЬКО по расписанию
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    
-    steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    - run: pip install requests
-    - name: Автопроверка книг
-      env:
-        TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        echo "🔄 АВТОЗАПУСК по расписанию"
-        echo "⏰ Время: $(date)"
-        python parser.py
-  
-  # JOB 2: Для ручного запуска  
-  manual-parse:
-    # Запускается ТОЛЬКО вручную
-    if: github.event_name == 'workflow_dispatch'
+  parse:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v3
+    
     - uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        
     - run: pip install requests
-    - name: Ручная проверка книг
+    
+    - name: Run Parser
       env:
         TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
-      run: |
-        echo "👆 РУЧНОЙ запуск"
-        echo "⏰ Время: $(date)"
-        python parser.py
+      run: python parser.py
