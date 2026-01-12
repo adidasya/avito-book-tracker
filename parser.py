@@ -1,8 +1,9 @@
 import os
 import requests
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
+import re
 import concurrent.futures
 
 # Конфигурация
@@ -83,77 +84,157 @@ BOOKS = [
     "Со мной хотят общаться зверева",
     "Радость изнутри тан"
 ]
-
-
-def send_telegram(text, silent=False):
+def send_telegram(text):
     """Отправка сообщения в Telegram"""
     url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
     try:
         r = requests.post(url, json={
             'chat_id': CHAT,
             'text': text,
-            'parse_mode': 'HTML',
-            'disable_notification': silent
+            'parse_mode': 'HTML'
         }, timeout=5)
         return r.status_code == 200
     except:
         return False
 
-def check_book(book):
-    """Проверка одной книги на Авито"""
+def parse_publication_date(date_text):
+    """Парсит текст даты в datetime объект"""
+    now = datetime.now()
+    
+    # Сегодня
+    if 'сегодня' in date_text.lower():
+        time_match = re.search(r'(\d{1,2}):(\d{2})', date_text)
+        if time_match:
+            hour, minute = int(time_match.group(1)), int(time_match.group(2))
+            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # Вчера
+    elif 'вчера' in date_text.lower():
+        time_match = re.search(r'(\d{1,2}):(\d{2})', date_text)
+        if time_match:
+            hour, minute = int(time_match.group(1)), int(time_match.group(2))
+            yesterday = now - timedelta(days=1)
+            return yesterday.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # Конкретная дата (например, "12 янв")
+    elif re.search(r'\d{1,2}\s+[а-я]+', date_text.lower()):
+        # Упрощённый парсинг - считаем что это не сегодня
+        return now - timedelta(days=2)
+    
+    return None
+
+def check_book_new_ads(book):
+    """Проверяет книгу на Авито, ищет ТОЛЬКО новые объявления"""
     query = urllib.parse.quote(book)
-    url = f"https://www.avito.ru/rossiya/knigi_i_zhurnaly?q={query}"
+    
+    # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: сортировка ПО ДАТЕ (самые свежие сначала)
+    url = f"https://www.avito.ru/rossiya/knigi_i_zhurnaly?q={query}&s=104"
+    # s=104 = сортировка "По дате" (новые сначала)
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=8)
+        response = requests.get(url, headers=headers, timeout=10)
         
-        if response.status_code == 200:
-            book_lower = book.lower()
-            page_lower = response.text.lower()
+        if response.status_code != 200:
+            return False, None, None, None
+        
+        page_text = response.text
+        book_lower = book.lower()
+        page_lower = page_text.lower()
+        
+        # Проверяем, есть ли вообще такая книга в результатах
+        words = book_lower.split()[:2]
+        if not words or not all(word in page_lower for word in words if len(word) > 2):
+            return False, None, None, None
+        
+        # Ищем объявления в HTML
+        # Авито структура: <div data-marker="item" ...>
+        ads = re.findall(r'<div[^>]*data-marker="item"[^>]*>.*?</div>\s*</div>\s*</div>', 
+                        page_text, re.DOTALL)
+        
+        for ad_html in ads[:3]:  # Проверяем только первые 3 объявления (самые свежие)
+            # Ищем ссылку на объявление
+            link_match = re.search(r'href="(/[^"]*?/\d+)"', ad_html)
+            if not link_match:
+                continue
             
-            # Ищем ключевые слова из названия
-            words = book_lower.split()[:3]
-            if words and all(word in page_lower for word in words if len(word) > 2):
-                return True, url, book
-    except:
-        pass
-    
-    return False, url, book
+            item_url = f"https://www.avito.ru{link_match.group(1)}"
+            
+            # Ищем дату публикации
+            date_match = re.search(r'data-marker="item-date">([^<]+)</', ad_html)
+            if not date_match:
+                continue
+            
+            pub_date_text = date_match.group(1).strip()
+            pub_datetime = parse_publication_date(pub_date_text)
+            
+            if not pub_datetime:
+                continue
+            
+            # Проверяем, насколько свежее объявление
+            time_diff = datetime.now() - pub_datetime
+            
+            # ТОЛЬКО объявления не старше 24 часов
+            if time_diff.total_seconds() <= 24 * 3600:  # 24 часа
+                # ТОЛЬКО объявления не старше 1 часа (для теста)
+                # if time_diff.total_seconds() <= 3600:  # 1 час
+                return True, item_url, book, pub_date_text
+        
+        return False, None, None, None
+        
+    except Exception as e:
+        print(f"Ошибка при проверке '{book}': {e}")
+        return False, None, None, None
 
 def main():
-    """ОСНОВНАЯ ФУНКЦИЯ - уведомления ТОЛЬКО при находке"""
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Проверка {len(BOOKS)} книг")
+    """Поиск ТОЛЬКО новых объявлений"""
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🔍 Поиск СВЕЖИХ объявлений")
     
-    found_books = []
+    found_new_ads = []
     start_time = time.time()
     
-    # Параллельная проверка
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_book = {executor.submit(check_book, book): book for book in BOOKS}
-        
-        for future in concurrent.futures.as_completed(future_to_book):
-            found, url, book = future.result()
-            
-            if found:
-                found_books.append((book, url))
-                # 🎯 ВОТ ЕДИНСТВЕННОЕ УВЕДОМЛЕНИЕ (при находке)
-                message = (
-                    f"🎯 <b>НАЙДЕНА КНИГА!</b>\n\n"
-                    f"📖 <b>{book}</b>\n"
-                    f"🔗 <a href='{url}'>Смотреть на Авито</a>\n"
-                    f"⏰ {datetime.now().strftime('%H:%M')}"
-                )
-                send_telegram(message)
-                print(f"✅ Найдена: {book}")
+    # Проверяем книги (ограничим 10 для теста)
+    books_to_check = BOOKS  # Все 65 книг
     
-    # Статистика только в консоль (не в Telegram)
+    for i, book in enumerate(books_to_check, 1):
+        print(f"[{i}/{len(books_to_check)}] Проверка: {book[:30]}...")
+        
+        found, url, book_title, pub_date = check_book_new_ads(book)
+        
+        if found:
+            found_new_ads.append((book_title, url, pub_date))
+            
+            # Уведомление о НОВОМ объявлении
+            message = (
+                f"🆕 <b>НОВОЕ ОБЪЯВЛЕНИЕ!</b>\n\n"
+                f"📖 <b>{book_title}</b>\n"
+                f"📅 Опубликовано: {pub_date}\n"
+                f"🔗 <a href='{url}'>Смотреть на Авито</a>\n"
+                f"⏰ Найдено в: {datetime.now().strftime('%H:%M:%S')}"
+            )
+            send_telegram(message)
+            print(f"✅ НОВОЕ: {book_title} ({pub_date})")
+        
+        # Небольшая пауза между запросами
+        time.sleep(1)
+    
+    # Итог
     elapsed = time.time() - start_time
-    print(f"📊 Проверено: {len(BOOKS)} книг за {elapsed:.1f} сек")
-    print(f"✅ Найдено: {len(found_books)} книг")
+    print(f"📊 Проверено: {len(books_to_check)} книг за {elapsed:.1f} сек")
+    print(f"🆕 Найдено НОВЫХ объявлений: {len(found_new_ads)}")
+    
+    if found_new_ads:
+        summary = (
+            f"📊 <b>Новых объявлений найдено: {len(found_new_ads)}</b>\n"
+            f"📚 Проверено книг: {len(books_to_check)}\n"
+            f"⏰ Время проверки: {datetime.now().strftime('%H:%M:%S')}"
+        )
+        send_telegram(summary)
 
 if __name__ == "__main__":
     main()
