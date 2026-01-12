@@ -1,31 +1,42 @@
+yaml
 name: Avito Book Parser
 
 on:
-  schedule:
-    # Запускать каждый час (в 0 минут каждого часа)
-    - cron: '0 * * * *'
-  workflow_dispatch:  # Позволяет запускать вручную
+  workflow_dispatch:  # Только ручной запуск для теста
 
 jobs:
-  parse-avito:
+  parse:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
+    # 1. ОБНОВЛЕННЫЙ CHECKOUT - принудительное обновление кэша
+    - name: Checkout code (FORCE FRESH)
       uses: actions/checkout@v3
-      
-    - name: Set up Python
+      with:
+        fetch-depth: 0  # ВАЖНО: полная история, не кэш
+        ref: ${{ github.ref }}
+        
+    # 2. Настройка Python
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
+    # 3. Установка зависимостей
     - name: Install dependencies
-      run: |
-        pip install requests
-        
-    - name: Run Avito Parser
+      run: pip install requests
+      
+    # 4. ЗАПУСК с отладкой
+    - name: Run Parser
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
+        echo "=== ПРОВЕРКА ФАЙЛОВ В РАБОЧЕЙ ДИРЕКТОРИИ ==="
+        ls -la
+        echo ""
+        echo "=== СОДЕРЖИМОЕ avito_parser.py (первые 5 строк) ==="
+        head -5 avito_parser.py
+        echo ""
+        echo "=== ЗАПУСК СКРИПТА ==="
         python avito_parser.py
