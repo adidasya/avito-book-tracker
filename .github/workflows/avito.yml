@@ -1,42 +1,74 @@
-yaml
-name: Avito Book Parser
+name: Avito Parser
 
 on:
-  workflow_dispatch:  # Только ручной запуск для теста
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Test run'
+        required: false
+        default: 'yes'
 
 jobs:
   parse:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     
     steps:
-    # 1. ОБНОВЛЕННЫЙ CHECKOUT - принудительное обновление кэша
-    - name: Checkout code (FORCE FRESH)
+    - name: Checkout repository
       uses: actions/checkout@v3
-      with:
-        fetch-depth: 0  # ВАЖНО: полная история, не кэш
-        ref: ${{ github.ref }}
-        
-    # 2. Настройка Python
-    - name: Setup Python
+      
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.9'
         
-    # 3. Установка зависимостей
     - name: Install dependencies
-      run: pip install requests
-      
-    # 4. ЗАПУСК с отладкой
-    - name: Run Parser
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
-        echo "=== ПРОВЕРКА ФАЙЛОВ В РАБОЧЕЙ ДИРЕКТОРИИ ==="
-        ls -la
-        echo ""
-        echo "=== СОДЕРЖИМОЕ avito_parser.py (первые 5 строк) ==="
-        head -5 avito_parser.py
-        echo ""
-        echo "=== ЗАПУСК СКРИПТА ==="
-        python avito_parser.py
+        python -m pip install --upgrade pip
+        pip install requests
+        
+    - name: Send Telegram test
+      env:
+        BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        echo "=== TEST START ==="
+        echo "Token present: $([ -n "$BOT_TOKEN" ] && echo "YES" || echo "NO")"
+        echo "Chat ID: $CHAT_ID"
+        
+        python -c "
+import os, requests, json, sys
+
+TOKEN = os.environ.get('BOT_TOKEN')
+CHAT = os.environ.get('CHAT_ID')
+
+print(f'Python env check:')
+print(f'  TOKEN: {\"***\" + TOKEN[-4:] if TOKEN else \"NOT FOUND\"}')
+print(f'  CHAT_ID: {CHAT}')
+
+if not TOKEN or not CHAT:
+    print('ERROR: Missing environment variables')
+    sys.exit(1)
+
+try:
+    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
+    response = requests.post(url, json={
+        'chat_id': CHAT,
+        'text': '🚀 <b>AVITO PARSER WORKING!</b>\\nTest from GitHub Actions successful!',
+        'parse_mode': 'HTML'
+    }, timeout=10)
+    
+    print(f'Response status: {response.status_code}')
+    
+    if response.status_code == 200:
+        print('✅ SUCCESS! Telegram message sent.')
+        result = response.json()
+        print(f'Message ID: {result.get(\"result\", {}).get(\"message_id\", \"N/A\")}')
+    else:
+        print(f'❌ FAILED: {response.text}')
+        
+except Exception as e:
+    print(f'❌ EXCEPTION: {type(e).__name__}: {e}')
+    sys.exit(1)
+        "
+        
+        echo "=== TEST COMPLETE ==="
